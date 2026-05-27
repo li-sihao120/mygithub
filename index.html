@@ -586,6 +586,29 @@ body {
 
 .mobile #start-screen .title { font-size: 24px; letter-spacing: 3px; }
 .mobile #start-btn { font-size: 14px; padding: 12px 32px; }
+.mobile #start-screen .key-hints { display: none; }
+.desktop #start-screen .mobile-hints { display: none; }
+
+#start-screen .mobile-hints {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 1px;
+  text-align: center;
+  line-height: 2;
+}
+#start-screen .mobile-hints .gesture-icon {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  line-height: 28px;
+  font-size: 14px;
+  background: rgba(0, 245, 255, 0.1);
+  border: 1px solid rgba(0, 245, 255, 0.2);
+  border-radius: 6px;
+  color: #00F5FF;
+  margin: 0 2px;
+  vertical-align: middle;
+}
 
 /* Mobile controls */
 #mobile-controls {
@@ -703,6 +726,17 @@ body {
 .mobile #pause-title { font-size: 24px; }
 .mobile #combo-text { font-size: 20px; }
 .mobile #achievement-text { font-size: 13px; letter-spacing: 2px; }
+.mobile #pause-hint { display: none; }
+.mobile #restart-hint { display: none; }
+.mobile #gameover-buttons { display: flex; }
+
+#gameover-buttons {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  pointer-events: all;
+}
 
 .desktop #mobile-controls { display: none; }
 </style>
@@ -724,9 +758,9 @@ body {
     </div>
     <div class="info-panel" id="volume-panel">
       <div class="panel-title">MUSIC VOL</div>
-      <input type="range" id="music-vol" min="0" max="100" value="80" class="vol-slider">
+      <input type="range" id="music-vol" min="0" max="100" value="100" class="vol-slider">
       <div class="panel-title" style="margin-top:6px;">SFX VOL</div>
-      <input type="range" id="sfx-vol" min="0" max="100" value="70" class="vol-slider">
+      <input type="range" id="sfx-vol" min="0" max="100" value="100" class="vol-slider">
     </div>
   </div>
 
@@ -745,6 +779,10 @@ body {
         <div id="gameover-title">GAME OVER</div>
         <div id="restart-hint">PRESS R TO RESTART</div>
         <div id="final-score-text"></div>
+        <div id="gameover-buttons">
+          <button class="pause-action-btn restart-btn" id="gameover-restart-btn">RESTART</button>
+          <button class="pause-action-btn menu-btn" id="gameover-menu-btn">MENU</button>
+        </div>
       </div>
       <div id="pause-overlay">
         <div id="pause-title">PAUSED</div>
@@ -763,6 +801,12 @@ body {
         <div class="key-hints">
           ← →  MOVE &nbsp;|&nbsp; ↑  ROTATE &nbsp;|&nbsp; ↓  SOFT DROP<br>
           SPACE  HARD DROP &nbsp;|&nbsp; C  HOLD &nbsp;|&nbsp; P  PAUSE
+        </div>
+        <div class="mobile-hints">
+          <span class="gesture-icon">←</span> <span class="gesture-icon">→</span> SWIPE TO MOVE<br>
+          <span class="gesture-icon">👆</span> TAP TO ROTATE<br>
+          <span class="gesture-icon">⏺</span> LONG PRESS TO SOFT DROP<br>
+          <span class="gesture-icon">H</span> HOLD &nbsp;&nbsp; <span class="gesture-icon">⏸</span> PAUSE
         </div>
       </div>
     </div>
@@ -850,6 +894,9 @@ class NSFMusicPlayer {
     this._msgHandlers = new Map();
     this._songCache = [];
     this._cacheIndex = 0;
+    this._preloadedBuf = null;
+    this._preloadedSong = null;
+    this._preloading = false;
   }
 
   async init() {
@@ -967,6 +1014,42 @@ class NSFMusicPlayer {
     } catch (e) { /* fallback to random API */ }
   }
 
+  async preload() {
+    if (this._preloading || this.initialized) return;
+    this._preloading = true;
+    try {
+      // Init AudioContext and Worklet in parallel with song list fetch
+      await Promise.all([
+        this.init(),
+        this._loadPopularSongs()
+      ]);
+      if (!this.initialized) return;
+
+      // Prefetch the first NSF file immediately
+      await this._preloadNextSong();
+    } catch (e) { /* silent */ }
+    this._preloading = false;
+  }
+
+  async _preloadNextSong() {
+    if (this._songCache.length === 0) return;
+    if (this._cacheIndex >= this._songCache.length) {
+      this._cacheIndex = 0;
+      for (let i = this._songCache.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [this._songCache[i], this._songCache[j]] = [this._songCache[j], this._songCache[i]];
+      }
+    }
+    const song = this._songCache[this._cacheIndex++];
+    const publicId = song?.song?.publicId;
+    if (!publicId) return;
+    const buf = await this._fetchNSFFile(publicId);
+    if (buf && buf.byteLength > 0) {
+      this._preloadedSong = song;
+      this._preloadedBuf = buf;
+    }
+  }
+
   async playRandom() {
     if (this._loading) return;
     this._loading = true;
@@ -984,29 +1067,39 @@ class NSFMusicPlayer {
 
       if (this.ctx.state === 'suspended') await this.ctx.resume();
 
+      // Ensure song list is loaded (non-blocking if cached)
       await this._loadPopularSongs();
 
       let song = null;
-      if (this._songCache.length > 0) {
-        if (this._cacheIndex >= this._songCache.length) {
-          this._cacheIndex = 0;
-          for (let i = this._songCache.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [this._songCache[i], this._songCache[j]] = [this._songCache[j], this._songCache[i]];
-          }
-        }
-        song = this._songCache[this._cacheIndex++];
+      let nsfBuf = null;
+
+      // Use preloaded song data if available (instant playback)
+      if (this._preloadedBuf) {
+        song = this._preloadedSong;
+        nsfBuf = this._preloadedBuf;
+        this._preloadedSong = null;
+        this._preloadedBuf = null;
+        // Preload next song in background for future playback
+        this._preloadNextSong();
       } else {
-        const res = await this._apiPost('song/get-random', { one: true });
-        if (res && res[0]) song = res[0];
+        if (this._songCache.length > 0) {
+          if (this._cacheIndex >= this._songCache.length) {
+            this._cacheIndex = 0;
+            for (let i = this._songCache.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [this._songCache[i], this._songCache[j]] = [this._songCache[j], this._songCache[i]];
+            }
+          }
+          song = this._songCache[this._cacheIndex++];
+        } else {
+          const res = await this._apiPost('song/get-random', { one: true });
+          if (res && res[0]) song = res[0];
+        }
+        if (!song) return;
+
+        nsfBuf = await this._fetchNSFFile(song.song.publicId);
+        if (!nsfBuf || nsfBuf.byteLength === 0) return;
       }
-      if (!song) return;
-
-      const publicId = song?.song?.publicId;
-      if (!publicId) return;
-
-      const nsfBuf = await this._fetchNSFFile(publicId);
-      if (!nsfBuf || nsfBuf.byteLength === 0) return;
 
       // Crossfade: fade out current song
       if (this.currentSong && this.gainNode) {
@@ -1138,7 +1231,7 @@ class AudioSystem {
   ];
 
   init() {
-    if (this.initialized) return;
+    if (this.initialized) return true;
     try {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       this.masterGain = this.ctx.createGain();
@@ -1148,8 +1241,11 @@ class AudioSystem {
       this.musicGain.gain.value = 0.35;
       this.musicGain.connect(this.ctx.destination);
       this.initialized = true;
+      if (this.ctx.state === 'suspended') this.ctx.resume();
+      return true;
     } catch(e) {
       console.warn('Web Audio not available');
+      return false;
     }
   }
 
@@ -1566,6 +1662,7 @@ class TetrisEngine {
     this.boardVersion = 0;
     this.gravityTimer = 0;
     this.chainClears = 0;
+    this.allClear = false;
     this.perfectDropFlag = false;
     this.onGravityStep = null;
     this.ensureQueue();
@@ -1846,22 +1943,69 @@ class TetrisEngine {
     this.level = newLevel;
 
     this.lastClearCount = count;
-    this.boardVersion++;
     this.clearRows = [];
     this.clearTimer = 0;
 
-    // Start gravity if cells are floating, otherwise chain complete
-    if (this.needsGravity()) {
-      this.chainClears++;
-      this.gravityTimer = 40;
-      this.state = 'gravity';
-    } else {
-      this.chainClears = 0;
-      this.state = 'playing';
-      if (!this.gameOver) this.spawnPiece();
-    }
+    // Restart the chain loop: check for gravity first
+    // (allClear check and bonus are handled inside _chainClearLoop)
+    this._chainClearLoop();
+    this.boardVersion++;
 
-    return { count, combo: this.combo, tetris: this.tetrisTriggered, leveledUp: this.leveledUp };
+    return { count, combo: this.combo, tetris: this.tetrisTriggered, leveledUp: this.leveledUp, allClear: this.allClear };
+  }
+
+  // Iteratively clear → gravity → clear until no rows remain
+  _chainClearLoop() {
+    do {
+      // Apply gravity steps if needed (floating cells exist)
+      if (this.needsGravity()) {
+        this.chainClears++;
+        while (this.applyGravityStep()) {
+          if (this.onGravityStep) this.onGravityStep();
+        }
+      }
+
+      // Check for any full rows (handles rows formed by gravity,
+      // or rows that were somehow missed by the initial checkLines pass)
+      const fullRows = [];
+      for (let r = 0; r < ROWS; r++) {
+        if (this.board[r].every(cell => cell !== null)) {
+          fullRows.push(r);
+        }
+      }
+      if (fullRows.length === 0) break;
+
+      // Clear the rows
+      const cc = fullRows.length;
+      const sorted = [...fullRows].sort((a, b) => b - a);
+      for (const row of sorted) {
+        this.board.splice(row, 1);
+        this.board.unshift(Array(COLS).fill(null));
+      }
+      const POINTS2 = [0, 100, 300, 500, 800];
+      this.score += (POINTS2[cc] || 0) * this.level;
+      this.lines += cc;
+      this.combo++;
+      if (this.combo >= 1) {
+        this.score += 50 * this.combo * this.level;
+      }
+      this.lastClearCount = cc;
+      this.tetrisTriggered = this.tetrisTriggered || (cc === 4);
+      const nl = Math.floor(this.lines / 10) + 1;
+      this.leveledUp = this.leveledUp || (nl > this.level);
+      this.level = nl;
+
+      // Check All Clear after this chain link
+      this.allClear = this.board.every(row => row.every(cell => cell === null));
+      if (this.allClear) {
+        this.score += 2000 * this.level;
+        break;
+      }
+    } while (this.needsGravity());
+
+    // Chain complete
+    this.state = 'playing';
+    if (!this.gameOver) this.spawnPiece();
   }
 
   getGhostY() {
@@ -2244,6 +2388,7 @@ class Game {
 
     this.audio = new AudioSystem();
     this.nsfMusic = new NSFMusicPlayer();
+    this.nsfMusic.preload(); // start fetching music immediately in background
     this.engine = new TetrisEngine();
     this.engine.onAutoDrop = () => this.audio.playSoftDrop();
     this.engine.onLock = () => this.audio.playLock();
@@ -2267,6 +2412,7 @@ class Game {
     this.victoryTimer = 0;
     this.prevClearing = false;
 
+    this.engine.state = 'playing'; // render piece as preview, but don't update engine yet
     this.setupInput();
     this.setupVolume();
     this.updateUI();
@@ -2295,17 +2441,15 @@ class Game {
   setupInput() {
     document.addEventListener('keydown', (e) => {
       // Pause / Escape handling
-      if (e.key === 'p' || e.key === 'P') {
-        this.togglePause();
-        return;
-      }
-      if (e.key === 'Escape') {
-        if (this.engine.state === 'paused') this.goToMenu();
+      if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+        if (!document.getElementById('start-screen').classList.contains('hidden')) return;
+        if (e.key === 'Escape' && this.engine.state === 'paused') this.goToMenu();
         else this.togglePause();
         return;
       }
       // Start game (Enter/Space on start screen)
-      if ((e.key === 'Enter' || e.key === ' ') && this.engine.state === 'waiting') {
+      const startScreen = document.getElementById('start-screen');
+      if ((e.key === 'Enter' || e.key === ' ') && !startScreen.classList.contains('hidden')) {
         this.startGame();
         e.preventDefault();
         return;
@@ -2315,7 +2459,8 @@ class Game {
         if (this.engine.state === 'gameover' || this.engine.state === 'paused') this.restart();
         return;
       }
-      // Block gameplay keys during wait/pause/gameover
+      // Block gameplay keys during start-screen/pause/gameover
+      if (!document.getElementById('start-screen').classList.contains('hidden')) return;
       if (this.engine.state !== 'playing') return;
 
       this.audio.init();
@@ -2366,6 +2511,7 @@ class Game {
     if (holdBtn) {
       holdBtn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        if (!document.getElementById('start-screen').classList.contains('hidden')) return;
         this.audio.init();
         if (this.engine.state !== 'playing') return;
         this.engine.hold();
@@ -2378,6 +2524,7 @@ class Game {
     if (pauseBtn) {
       pauseBtn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
+        if (!document.getElementById('start-screen').classList.contains('hidden')) return;
         this.togglePause();
       });
     }
@@ -2405,6 +2552,22 @@ class Game {
       });
     }
 
+    // Mobile: gameover action buttons
+    const goRestartBtn = document.getElementById('gameover-restart-btn');
+    if (goRestartBtn) {
+      goRestartBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.restart();
+      });
+    }
+    const goMenuBtn = document.getElementById('gameover-menu-btn');
+    if (goMenuBtn) {
+      goMenuBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.goToMenu();
+      });
+    }
+
     // Mobile: gesture controls on game container
     let touchId = null, touchStartX = 0, touchStartY = 0, touchStartTime = 0;
     let lastMoveX = 0, movedHoriz = false, longPressActive = false, longPressTimer = null, softDropTimer = null;
@@ -2419,12 +2582,13 @@ class Game {
 
     gc.addEventListener('touchstart', (e) => {
       if (!this.isMobile) return;
-      if (this.engine.state === 'waiting') return;
+      if (!document.getElementById('start-screen').classList.contains('hidden')) return;
       if (this.engine.state === 'paused' || this.engine.state === 'gameover') {
         if (this.engine.state === 'gameover') this.restart();
         return;
       }
       if (e.touches.length !== 1) return;
+      cancelLongPress(); // clear any stale timers from previous touches
       const t = e.touches[0];
       touchId = t.identifier;
       touchStartX = t.clientX;
@@ -2551,7 +2715,7 @@ class Game {
   }
 
   goToMenu() {
-    this.engine.state = 'waiting';
+    this.engine.reset(); // fresh board with dynamic preview behind menu
     document.getElementById('pause-overlay').classList.remove('visible');
     document.getElementById('gameover-box').classList.remove('visible', 'pop', 'settle');
     document.getElementById('victory-text').classList.remove('show');
@@ -2609,15 +2773,15 @@ class Game {
   _applyMobileScale() {
     const app = document.getElementById('app');
     if (!app) return;
+    // Remove previous scale to measure natural size
+    app.style.transform = '';
+    const rect = app.getBoundingClientRect();
+    const naturalW = rect.width;
+    const naturalH = rect.height;
+    if (naturalW === 0 || naturalH === 0) return;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    // Natural size: left(130) + gap(20) + center(10*cellSize) + gap(20) + right(150) ≈
-    const cellSize = this.renderer.cellSize;
-    const naturalW = 130 + 20 + COLS * cellSize + 20 + 150 + 40; // 40 padding
-    const naturalH = 120 + ROWS * cellSize + 110; // title + board + bottom (controls padding)
-    const scaleW = vw / naturalW;
-    const scaleH = vh / naturalH;
-    const scale = Math.min(scaleW, scaleH, 1.0); // don't scale up
+    const scale = Math.min(vw / naturalW, vh / naturalH, 1.0);
     app.style.transform = 'scale(' + scale + ')';
     app.style.transformOrigin = 'center center';
   }
@@ -2753,10 +2917,10 @@ class Game {
       if (this.shakeDuration <= 0) this.shakeAmount = 0;
     }
 
-    // Waiting for start - just render, don't update engine
-    if (this.engine.state === 'waiting') {
-      this.particles.update(dt);
-      return;
+    // Always run engine (dynamic preview behind start screen)
+    // Auto-restart preview when gameover while start screen is visible
+    if (this.engine.state === 'gameover' && !document.getElementById('start-screen').classList.contains('hidden')) {
+      this.engine.reset();
     }
 
     if (this.engine.state === 'gameover') {
@@ -2817,7 +2981,16 @@ class Game {
     if (this.engine.state === 'playing' && (prevState === 'clearing' || prevState === 'gravity')) {
       this.prevClearing = false;
 
-      // Achievement checks
+      const totalChain = Math.max(1, this.engine.chainClears);
+      const cs = this.renderer.cellSize;
+
+      // Emit particles/sounds for chain clears beyond the first
+      for (let ci = 2; ci <= totalChain; ci++) {
+        this.particles.emit(cs * 5, cs * (ROWS / 2), 30 + ci * 5, '#FFFFFF', cs * 0.25);
+        this.audio.playClear(1);
+      }
+
+      // Achievement based on last clear count in the chain
       const cc = this.engine.lastClearCount;
       if (cc === 1) {
         this.showAchievement('NICE!', '#00E676');
@@ -2838,6 +3011,17 @@ class Game {
       }
       this.engine.perfectDropFlag = false;
 
+      // All Clear bonus — score already added in _chainClearLoop
+      if (this.engine.allClear) {
+        this.showAchievement('ALL CLEAR!', '#FFD500');
+        this.audio.playVictory();
+        this.triggerFlash(150);
+        for (let i = 0; i < 8; i++) {
+          this.particles.emit(cs * 5, cs * (ROWS / 2), 20, '#FFD500', cs * 0.4);
+        }
+        this.engine.allClear = false;
+      }
+
       // Show accumulated combo/tetris effects
       if (this.engine.combo > 0) {
         this.showComboText(this.engine.combo);
@@ -2850,21 +3034,21 @@ class Game {
         }
         this.audio.playCombo(this.engine.combo);
       }
-      if (this.engine.chainClears > 1) {
-        this.audio.playChain(this.engine.chainClears);
+      if (totalChain > 1) {
+        this.audio.playChain(totalChain);
         this.triggerFlash(80);
-        const cs = this.renderer.cellSize;
         for (let i = 0; i < 5; i++) {
           this.particles.emit(cs * 5, cs * (ROWS / 2), 15, '#FFFFFF', cs * 0.3);
         }
       }
+      this.engine.chainClears = 0;
 
       if (this.engine.tetrisTriggered) {
         this.showTetrisText();
         this.triggerFlash(200);
         this.triggerShake(6, 400);
         this.audio.playTetris();
-        this.engine.timeScale = 0.2; // slow motion
+        this.engine.timeScale = 0.2;
       } else if (this.engine.lastClearCount > 0) {
         this.triggerShake(3, 200);
       }

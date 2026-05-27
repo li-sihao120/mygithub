@@ -754,18 +754,39 @@ class AudioSystem {
   playHardDrop() { this._osc('triangle', 60, 0.15, 0.1); this._noise(0.08, 0.06); }
   playSoftDrop() { this._osc('triangle', 100, 0.06, 0.05); }
   playLock() { this._osc('triangle', 80, 0.12, 0.12); this._noise(0.05, 0.04); }
+  playGravity() { this._osc('sine', 250, 0.04, 0.025); }
 
   playClear(lines) {
-    const baseFreq = 400 + lines * 150;
-    for (let i = 0; i < lines; i++) {
-      const t = i * 0.08;
-      setTimeout(() => this._osc('sine', baseFreq + i * 80, 0.12, 0.06), t * 1000);
+    // Block shattering: noise burst + percussive hit
+    this._noise(0.18, 0.1);
+    this._osc('triangle', 50 + lines * 40, 0.18, 0.12);
+    // Sparkling rising tones
+    const baseFreq = 500 + lines * 100;
+    for (let i = 0; i < Math.min(lines, 4); i++) {
+      const t = i * 0.05;
+      setTimeout(() => {
+        this._osc('sine', baseFreq + i * 120, 0.1, 0.07);
+        this._osc('triangle', baseFreq + i * 120 - 300, 0.08, 0.05);
+      }, t * 1000);
     }
   }
 
   playCombo(comboCount) {
-    const freq = 300 + Math.min(comboCount, 10) * 50;
-    this._osc('sawtooth', freq, 0.2, 0.05);
+    const freq = 400 + Math.min(comboCount, 10) * 60;
+    this._osc('sawtooth', freq, 0.25, 0.07);
+    this._osc('square', freq * 1.5, 0.18, 0.05);
+    this._noise(0.1, 0.05);
+  }
+
+  playChain(chainCount) {
+    const steps = Math.min(chainCount, 6);
+    for (let i = 0; i < steps; i++) {
+      setTimeout(() => {
+        this._osc('square', 500 + i * 180, 0.12, 0.06);
+        this._osc('sine', 900 + i * 250, 0.1, 0.04);
+      }, i * 55);
+    }
+    setTimeout(() => this._noise(0.12, 0.08), steps * 55);
   }
 
   playTetris() {
@@ -943,6 +964,9 @@ class TetrisEngine {
     this.lastDropTime = 0;
     this.timeScale = 1;
     this.boardVersion = 0;
+    this.gravityTimer = 0;
+    this.chainClears = 0;
+    this.onGravityStep = null;
     this.ensureQueue();
     this.spawnPiece();
   }
@@ -1145,6 +1169,33 @@ class TetrisEngine {
     this.checkLines();
   }
 
+  needsGravity() {
+    for (let c = 0; c < COLS; c++) {
+      for (let r = ROWS - 2; r >= 0; r--) {
+        if (this.board[r][c] !== null && this.board[r + 1][c] === null) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  applyGravityStep() {
+    // Move each cell down at most one row per call (for animation)
+    let moved = false;
+    for (let c = 0; c < COLS; c++) {
+      for (let r = ROWS - 2; r >= 0; r--) {
+        if (this.board[r][c] !== null && this.board[r + 1][c] === null) {
+          this.board[r + 1][c] = this.board[r][c];
+          this.board[r][c] = null;
+          moved = true;
+        }
+      }
+    }
+    if (moved) this.boardVersion++;
+    return moved;
+  }
+
   checkLines() {
     const fullRows = [];
     for (let r = 0; r < ROWS; r++) {
@@ -1163,6 +1214,7 @@ class TetrisEngine {
 
     // No lines cleared → reset combo, spawn next
     this.combo = -1;
+    this.state = 'playing';
     this.spawnPiece();
     return 0;
   }
@@ -1194,10 +1246,16 @@ class TetrisEngine {
     this.boardVersion++;
     this.clearRows = [];
     this.clearTimer = 0;
-    this.state = 'playing';
 
-    if (!this.gameOver) {
-      this.spawnPiece();
+    // Start gravity if cells are floating, otherwise chain complete
+    if (this.needsGravity()) {
+      this.chainClears++;
+      this.gravityTimer = 40;
+      this.state = 'gravity';
+    } else {
+      this.chainClears = 0;
+      this.state = 'playing';
+      if (!this.gameOver) this.spawnPiece();
     }
 
     return { count, combo: this.combo, tetris: this.tetrisTriggered, leveledUp: this.leveledUp };
@@ -1230,6 +1288,24 @@ class TetrisEngine {
       this.clearTimer -= scaledDt;
       if (this.clearTimer <= 0) {
         this.finishClear();
+      }
+      return;
+    }
+
+    if (this.state === 'gravity') {
+      this.gravityTimer -= scaledDt;
+      if (this.gravityTimer <= 0) {
+        const moved = this.applyGravityStep();
+        if (this.onGravityStep) this.onGravityStep();
+        if (moved) {
+          this.gravityTimer = 40;
+        } else {
+          // Gravity settled, check for chain clears
+          if (this.chainClears > 0) {
+            this.combo = Math.max(0, this.combo);
+          }
+          this.checkLines();
+        }
       }
       return;
     }
@@ -1563,6 +1639,7 @@ class Game {
     this.engine = new TetrisEngine();
     this.engine.onAutoDrop = () => this.audio.playSoftDrop();
     this.engine.onLock = () => this.audio.playLock();
+    this.engine.onGravityStep = () => this.audio.playGravity();
     this.particles = new ParticleSystem();
     this.bgParticles = new BGParticles(document.getElementById('bg-canvas'));
     this.renderer = new Renderer(
@@ -1920,24 +1997,14 @@ class Game {
     }
 
     // Handle clear state + board cache invalidation
-    const wasClearing = this.engine.state === 'clearing';
+    const prevState = this.engine.state;
     const prevBoardVer = this.engine.boardVersion;
     this.engine.update(dt);
     if (this.engine.boardVersion !== prevBoardVer) {
       this.renderer.invalidateBoard();
     }
 
-    // Check for clear finish
-    if (wasClearing && this.engine.state !== 'clearing') {
-      // A clear just finished
-      // We need to handle effects based on what was cleared
-      // The engine has already updated score/level/combo
-      // We need to read the results
-      // Actually, let me redesign this: the engine calls back or we check state
-      // For now, let's trigger effects when we detect lines were cleared
-    }
-
-    // Emit particles during clearing
+    // Emit particles at start of each clear (including chain clears)
     if (this.engine.state === 'clearing' && !this.prevClearing) {
       this.prevClearing = true;
       const cs = this.renderer.cellSize;
@@ -1947,12 +2014,26 @@ class Game {
       this.audio.playClear(this.engine.clearRows.length);
     }
 
-    if (this.engine.state !== 'clearing' && this.prevClearing) {
+    // Reset prevClearing during gravity so next chain clear emits fresh particles
+    if (this.engine.state === 'gravity') {
       this.prevClearing = false;
-      // Clear just finished - handle effects
+    }
+
+    // Chain fully ended (clearing or gravity → playing)
+    if (this.engine.state === 'playing' && (prevState === 'clearing' || prevState === 'gravity')) {
+      this.prevClearing = false;
+      // Show accumulated combo/tetris effects
       if (this.engine.combo > 0) {
         this.showComboText(this.engine.combo);
         this.audio.playCombo(this.engine.combo);
+      }
+      if (this.engine.chainClears > 1) {
+        this.audio.playChain(this.engine.chainClears);
+        this.triggerFlash(80);
+        const cs = this.renderer.cellSize;
+        for (let i = 0; i < 5; i++) {
+          this.particles.emit(cs * 5, cs * (ROWS / 2), 15, '#FFFFFF', cs * 0.3);
+        }
       }
 
       if (this.engine.tetrisTriggered) {

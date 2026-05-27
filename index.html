@@ -50,7 +50,8 @@ body {
   position: relative;
   z-index: 1;
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  justify-content: center;
   gap: 20px;
   padding: 20px;
   height: 100vh;
@@ -104,9 +105,30 @@ body {
 #center-panel {
   position: relative;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+#game-title {
+  font-family: 'Orbitron', monospace;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 6px;
+  margin-bottom: 12px;
+  text-align: center;
+  background: linear-gradient(135deg, #00F5FF 0%, #B026FF 50%, #FF1744 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 15px rgba(0, 245, 255, 0.6)) drop-shadow(0 0 30px rgba(176, 38, 255, 0.4));
+  animation: titlePulse 2s ease-in-out infinite;
+}
+
+@keyframes titlePulse {
+  0%, 100% { filter: drop-shadow(0 0 15px rgba(0, 245, 255, 0.6)) drop-shadow(0 0 30px rgba(176, 38, 255, 0.4)); }
+  50% { filter: drop-shadow(0 0 25px rgba(0, 245, 255, 0.9)) drop-shadow(0 0 50px rgba(176, 38, 255, 0.7)); }
 }
 
 #game-container {
@@ -205,7 +227,7 @@ body {
   font-size: 36px;
   font-weight: 900;
   color: #FF1744;
-  text-shadow: 0 0 40px #FF1744, 0 0 80px #FF1744;
+  text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 0 40px #FF1744, 0 0 80px #FF1744;
   animation: none;
 }
 
@@ -219,16 +241,24 @@ body {
   100% { transform: scale(1); }
 }
 
-#gameover-box.glitch #gameover-title {
-  animation: goGlitch 0.25s ease-in-out infinite;
+#gameover-box.settle #gameover-title {
+  animation: goSettle 2.5s ease-out forwards;
 }
 
-@keyframes goGlitch {
-  0%, 100% { transform: translate(0, 0); }
-  20% { transform: translate(3px, -2px); }
-  40% { transform: translate(-3px, 1px); }
-  60% { transform: translate(2px, -1px); }
-  80% { transform: translate(-2px, 2px); }
+@keyframes goSettle {
+  0% { transform: translate(10px, -6px) scale(1.03); }
+  8% { transform: translate(-8px, 5px); }
+  16% { transform: translate(7px, -4px); }
+  24% { transform: translate(-6px, 3px); }
+  32% { transform: translate(5px, -3px); }
+  40% { transform: translate(-4px, 2px); }
+  48% { transform: translate(3px, -2px); }
+  56% { transform: translate(-2px, 1px); }
+  64% { transform: translate(2px, -1px); }
+  72% { transform: translate(-1px, 0.5px); }
+  80% { transform: translate(0.5px, 0); }
+  88% { transform: translate(0, 0); }
+  100% { transform: translate(0, 0); }
 }
 
 #restart-hint {
@@ -542,6 +572,7 @@ body {
   .info-panel .panel-value { font-size: 16px; }
   #mobile-controls { display: flex; }
   #tetris-text { font-size: 32px; }
+  #game-title { font-size: 14px; letter-spacing: 3px; margin-bottom: 6px; }
   #gameover-title { font-size: 24px; }
   #restart-hint { font-size: 10px; }
   #combo-text { font-size: 20px; }
@@ -567,6 +598,7 @@ body {
 
   <!-- Center: Game Board -->
   <div id="center-panel">
+    <div id="game-title">NEON TETRIS</div>
     <div id="game-container">
       <canvas id="game-canvas"></canvas>
       <div id="red-overlay"></div>
@@ -720,7 +752,8 @@ class AudioSystem {
   playMove() { this._osc('square', 180, 0.04, 0.04); }
   playRotate() { this._osc('sine', 300, 0.06, 0.05); this._osc('sine', 450, 0.06, 0.04); }
   playHardDrop() { this._osc('triangle', 60, 0.15, 0.1); this._noise(0.08, 0.06); }
-  playLock() { this._osc('triangle', 80, 0.1, 0.06); }
+  playSoftDrop() { this._osc('triangle', 100, 0.06, 0.05); }
+  playLock() { this._osc('triangle', 80, 0.12, 0.12); this._noise(0.05, 0.04); }
 
   playClear(lines) {
     const baseFreq = 400 + lines * 150;
@@ -778,7 +811,7 @@ class AudioSystem {
     osc.type = 'sine';
     osc.frequency.setValueAtTime(150, this.ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.1);
-    gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+    gain.gain.setValueAtTime(0.07, this.ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.1);
     osc.connect(gain);
     gain.connect(this.masterGain || this.ctx.destination);
@@ -791,9 +824,11 @@ class AudioSystem {
   }
 
   updateBPM(level) {
-    const bpm = 70 + level * 8;
-    if (this.bpm !== bpm) {
-      this.startBeat(Math.min(bpm, 200));
+    const dropInterval = Math.max(33, 500 - (level - 1) * 45);
+    const bpm = Math.round(30000 / dropInterval);
+    const clamped = Math.max(80, Math.min(300, bpm));
+    if (this.bpm !== clamped) {
+      this.startBeat(clamped);
     }
   }
 }
@@ -1006,6 +1041,7 @@ class TetrisEngine {
     if (!this.collides(this.currentPiece.shape, this.currentPiece.x, this.currentPiece.y + 1)) {
       this.currentPiece.y++;
       this.score += 1;
+      this.dropTimer = 0;
       this._addTrail();
       return true;
     }
@@ -1099,6 +1135,7 @@ class TetrisEngine {
 
     this.currentPiece = null;
     this.boardVersion++;
+    if (this.onLock) this.onLock();
 
     if (aboveBoard) {
       this.gameOver = true;
@@ -1212,6 +1249,7 @@ class TetrisEngine {
       this.dropTimer = 0;
       if (!this.collides(this.currentPiece.shape, this.currentPiece.x, this.currentPiece.y + 1)) {
         this.currentPiece.y++;
+        if (this.onAutoDrop) this.onAutoDrop();
       }
     }
 
@@ -1521,8 +1559,10 @@ class BGParticles {
 // ============================================================
 class Game {
   constructor() {
-    this.engine = new TetrisEngine();
     this.audio = new AudioSystem();
+    this.engine = new TetrisEngine();
+    this.engine.onAutoDrop = () => this.audio.playSoftDrop();
+    this.engine.onLock = () => this.audio.playLock();
     this.particles = new ParticleSystem();
     this.bgParticles = new BGParticles(document.getElementById('bg-canvas'));
     this.renderer = new Renderer(
@@ -1551,7 +1591,7 @@ class Game {
     this.engine.state = 'playing';
     document.getElementById('start-screen').classList.add('hidden');
     this.audio.init();
-    this.audio.startBeat(70);
+    this.audio.updateBPM(this.engine.level);
   }
 
   setupInput() {
@@ -1587,7 +1627,7 @@ class Game {
           e.preventDefault();
           break;
         case 'ArrowDown': case 's': case 'S':
-          if (this.engine.moveDown()) { /* soft drop, no sound */ }
+          if (this.engine.moveDown()) this.audio.playSoftDrop();
           e.preventDefault();
           break;
         case 'ArrowUp': case 'w': case 'W':
@@ -1633,7 +1673,7 @@ class Game {
 
     bind('btn-left', () => { if (this.engine.moveLeft()) this.audio.playMove(); });
     bind('btn-right', () => { if (this.engine.moveRight()) this.audio.playMove(); });
-    bind('btn-down', () => { this.engine.moveDown(); });
+    bind('btn-down', () => { if (this.engine.moveDown()) this.audio.playSoftDrop(); });
     bind('btn-rotate', () => { if (this.engine.rotate(1)) this.audio.playRotate(); });
     bind('btn-drop', () => {
       this.engine.hardDrop();
@@ -1702,13 +1742,13 @@ class Game {
     this.shakeAmount = 0;
     this.shakeDuration = 0;
     this.flashDuration = 0;
-    document.getElementById('gameover-box').classList.remove('visible', 'pop', 'glitch');
+    document.getElementById('gameover-box').classList.remove('visible', 'pop', 'settle');
     document.getElementById('victory-text').classList.remove('show');
     document.getElementById('victory-text').style.opacity = '0';
     document.getElementById('red-overlay').classList.remove('active');
     document.getElementById('flash-overlay').classList.remove('active');
     this.renderer.invalidateBoard();
-    this.audio.startBeat(70);
+    this.audio.updateBPM(1);
   }
 
   triggerShake(amount, duration) {
@@ -1812,7 +1852,7 @@ class Game {
     // Start glitch after pop animation
     setTimeout(() => {
       box.classList.remove('pop');
-      box.classList.add('glitch');
+      box.classList.add('settle');
     }, 500);
   }
 

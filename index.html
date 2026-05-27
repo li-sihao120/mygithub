@@ -135,6 +135,7 @@ body {
   position: relative;
   border-radius: 12px;
   overflow: hidden;
+  touch-action: manipulation;
   box-shadow: 0 0 40px rgba(0, 245, 255, 0.15), 0 0 80px rgba(176, 38, 255, 0.08);
 }
 
@@ -583,10 +584,8 @@ body {
   line-height: 1.8;
 }
 
-@media (max-width: 768px) {
-  #start-screen .title { font-size: 24px; letter-spacing: 3px; }
-  #start-btn { font-size: 14px; padding: 12px 32px; }
-}
+.mobile #start-screen .title { font-size: 24px; letter-spacing: 3px; }
+.mobile #start-btn { font-size: 14px; padding: 12px 32px; }
 
 /* Mobile controls */
 #mobile-controls {
@@ -596,10 +595,7 @@ body {
   left: 50%;
   transform: translateX(-50%);
   z-index: 20;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: center;
-  padding: 0 10px;
+  gap: 10px;
 }
 
 .touch-btn {
@@ -624,68 +620,91 @@ body {
   box-shadow: 0 0 25px rgba(0, 245, 255, 0.3);
 }
 
-.touch-btn.drop-btn {
-  width: 120px;
-  font-size: 14px;
+.hold-btn {
+  width: 70px;
+  height: 44px;
+  font-family: 'Orbitron', monospace;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 2px;
-  color: #FFD500;
-  border-color: rgba(255, 213, 0, 0.3);
+  color: #B026FF;
+  border-color: rgba(176, 38, 255, 0.35);
+  border-radius: 22px;
 }
 
-/* Responsive */
-@media (max-width: 768px) {
-  #app {
-    gap: 8px;
-    padding: 8px;
-    align-items: center;
-  }
-  #left-panel {
-    min-width: 70px;
-    max-width: 80px;
-  }
-  #left-panel .panel {
-    padding: 8px;
-    border-radius: 10px;
-  }
-  #left-panel .panel-title {
-    font-size: 8px;
-    letter-spacing: 1px;
-  }
-  #right-panel {
-    min-width: 80px;
-    max-width: 100px;
-    gap: 6px;
-  }
-  #right-panel .panel {
-    padding: 8px;
-    border-radius: 10px;
-  }
-  #right-panel .panel-title {
-    font-size: 8px;
-    letter-spacing: 1px;
-  }
-  .info-panel {
-    padding: 8px 10px;
-    border-radius: 10px;
-  }
-  .info-panel .panel-title { font-size: 7px; }
-  .info-panel .panel-value { font-size: 16px; }
-  #mobile-controls { display: flex; }
-  #tetris-text { font-size: 32px; }
-  #game-title { font-size: 14px; letter-spacing: 3px; margin-bottom: 6px; }
-  #gameover-title { font-size: 24px; }
-  #pause-title { font-size: 24px; }
-  #restart-hint { font-size: 10px; }
-  #pause-hint { font-size: 10px; }
-  #combo-text { font-size: 20px; }
-  #victory-text { font-size: 28px; }
-  #achievement-text { font-size: 13px; letter-spacing: 2px; }
+.pause-btn {
+  width: 55px;
+  height: 44px;
+  font-size: 18px;
+  color: #00F5FF;
+  border-color: rgba(0, 245, 255, 0.35);
+  border-radius: 22px;
 }
 
-@media (min-width: 769px) {
-  #mobile-controls { display: none; }
+/* Pause overlay touch buttons (mobile only) */
+#pause-buttons {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  pointer-events: all;
 }
+
+.mobile #pause-buttons {
+  display: flex;
+}
+
+.pause-action-btn {
+  font-family: 'Orbitron', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  padding: 10px 28px;
+  border: 1px solid rgba(0, 245, 255, 0.4);
+  border-radius: 8px;
+  background: rgba(0, 245, 255, 0.1);
+  color: #00F5FF;
+  cursor: pointer;
+  text-transform: uppercase;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.pause-action-btn:active {
+  background: rgba(0, 245, 255, 0.3);
+}
+
+.pause-action-btn.restart-btn {
+  color: #FF9100;
+  border-color: rgba(255, 145, 0, 0.4);
+  background: rgba(255, 145, 0, 0.1);
+}
+
+.pause-action-btn.restart-btn:active {
+  background: rgba(255, 145, 0, 0.3);
+}
+
+.pause-action-btn.menu-btn {
+  color: rgba(255,255,255,0.6);
+  border-color: rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.05);
+  margin-top: 4px;
+}
+
+/* Mobile class overrides */
+.mobile #app {
+  height: auto;
+  max-height: none;
+  gap: 4px;
+  padding: 4px;
+}
+.mobile #mobile-controls { display: flex; }
+.mobile #game-title { font-size: 14px; letter-spacing: 3px; margin-bottom: 6px; }
+.mobile #gameover-title { font-size: 24px; }
+.mobile #pause-title { font-size: 24px; }
+.mobile #combo-text { font-size: 20px; }
+.mobile #achievement-text { font-size: 13px; letter-spacing: 2px; }
+
+.desktop #mobile-controls { display: none; }
 </style>
 </head>
 <body>
@@ -705,9 +724,9 @@ body {
     </div>
     <div class="info-panel" id="volume-panel">
       <div class="panel-title">MUSIC VOL</div>
-      <input type="range" id="music-vol" min="0" max="100" value="60" class="vol-slider">
+      <input type="range" id="music-vol" min="0" max="100" value="80" class="vol-slider">
       <div class="panel-title" style="margin-top:6px;">SFX VOL</div>
-      <input type="range" id="sfx-vol" min="0" max="100" value="30" class="vol-slider">
+      <input type="range" id="sfx-vol" min="0" max="100" value="70" class="vol-slider">
     </div>
   </div>
 
@@ -730,6 +749,11 @@ body {
       <div id="pause-overlay">
         <div id="pause-title">PAUSED</div>
         <div id="pause-hint">P TO RESUME<br>R TO RESTART<br>ESC TO MENU</div>
+        <div id="pause-buttons">
+          <button class="pause-action-btn" id="pause-resume-btn">RESUME</button>
+          <button class="pause-action-btn restart-btn" id="pause-restart-btn">RESTART</button>
+          <button class="pause-action-btn menu-btn" id="pause-menu-btn">MENU</button>
+        </div>
       </div>
       <div id="start-screen">
         <div class="subtitle">CYBERPUNK</div>
@@ -771,11 +795,8 @@ body {
 
 <!-- Mobile Controls -->
 <div id="mobile-controls">
-  <button class="touch-btn" id="btn-left">◀</button>
-  <button class="touch-btn" id="btn-rotate">↻</button>
-  <button class="touch-btn" id="btn-down">▼</button>
-  <button class="touch-btn" id="btn-right">▶</button>
-  <button class="touch-btn drop-btn" id="btn-drop">DROP</button>
+  <button class="touch-btn hold-btn" id="btn-hold">HOLD</button>
+  <button class="touch-btn pause-btn" id="btn-pause">⏸</button>
 </div>
 
 <script>
@@ -1006,7 +1027,7 @@ class NSFMusicPlayer {
       // Crossfade: fade in
       if (this.gainNode) {
         const slider = document.getElementById('music-vol');
-        const targetGain = slider ? parseInt(slider.value) / 100 * 2.0 : 1.2;
+        const targetGain = slider ? parseInt(slider.value) / 100 * 3.0 : 2.4;
         const now = this.ctx.currentTime;
         this.gainNode.gain.cancelScheduledValues(now);
         this.gainNode.gain.setValueAtTime(0.001, now);
@@ -1121,10 +1142,10 @@ class AudioSystem {
     try {
       this.ctx = new (window.AudioContext || window.webkitAudioContext)();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = 0.3;
+      this.masterGain.gain.value = 0.7;
       this.masterGain.connect(this.ctx.destination);
       this.musicGain = this.ctx.createGain();
-      this.musicGain.gain.value = 0.18;
+      this.musicGain.gain.value = 0.35;
       this.musicGain.connect(this.ctx.destination);
       this.initialized = true;
     } catch(e) {
@@ -2217,6 +2238,10 @@ class BGParticles {
 // ============================================================
 class Game {
   constructor() {
+    // Device detection
+    this.isMobile = ('ontouchstart' in window || navigator.maxTouchPoints > 0) && window.innerWidth <= 1024;
+    document.body.classList.add(this.isMobile ? 'mobile' : 'desktop');
+
     this.audio = new AudioSystem();
     this.nsfMusic = new NSFMusicPlayer();
     this.engine = new TetrisEngine();
@@ -2262,7 +2287,7 @@ class Game {
       this.audio.masterGain.gain.value = parseInt(document.getElementById('sfx-vol').value) / 100;
     }
     if (this.nsfMusic.gainNode) {
-      this.nsfMusic.gainNode.gain.value = parseInt(document.getElementById('music-vol').value) / 100 * 2.0;
+      this.nsfMusic.gainNode.gain.value = parseInt(document.getElementById('music-vol').value) / 100 * 3.0;
     }
     this.nsfMusic.playRandom();
   }
@@ -2330,74 +2355,158 @@ class Game {
       }
     });
 
-    // Mobile touch buttons
-    const bind = (id, action) => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        this.audio.init();
-        if (this.engine.state === 'paused') return;
-        if (this.engine.state === 'gameover') { this.restart(); return; }
-        action();
-      });
-    };
-
     // Start button
     const startBtn = document.getElementById('start-btn');
     if (startBtn) {
       startBtn.addEventListener('click', () => this.startGame());
     }
 
-    bind('btn-left', () => { if (this.engine.moveLeft()) this.audio.playMove(); });
-    bind('btn-right', () => { if (this.engine.moveRight()) this.audio.playMove(); });
-    bind('btn-down', () => { if (this.engine.moveDown()) this.audio.playSoftDrop(); });
-    bind('btn-rotate', () => { if (this.engine.rotate(1)) this.audio.playRotate(); });
-    bind('btn-drop', () => {
-      this.engine.hardDrop();
-      this.audio.playHardDrop();
-      this.triggerShake(3, 120);
-    });
+    // Mobile: hold button
+    const holdBtn = document.getElementById('btn-hold');
+    if (holdBtn) {
+      holdBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        this.audio.init();
+        if (this.engine.state !== 'playing') return;
+        this.engine.hold();
+        this.audio.playRotate();
+      });
+    }
 
-    // Swipe on game container
-    let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+    // Mobile: pause button
+    const pauseBtn = document.getElementById('btn-pause');
+    if (pauseBtn) {
+      pauseBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        this.togglePause();
+      });
+    }
+
+    // Mobile: pause overlay action buttons
+    const pauseResumeBtn = document.getElementById('pause-resume-btn');
+    if (pauseResumeBtn) {
+      pauseResumeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.togglePause();
+      });
+    }
+    const pauseRestartBtn = document.getElementById('pause-restart-btn');
+    if (pauseRestartBtn) {
+      pauseRestartBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.restart();
+      });
+    }
+    const pauseMenuBtn = document.getElementById('pause-menu-btn');
+    if (pauseMenuBtn) {
+      pauseMenuBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.goToMenu();
+      });
+    }
+
+    // Mobile: gesture controls on game container
+    let touchId = null, touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+    let lastMoveX = 0, movedHoriz = false, longPressActive = false, longPressTimer = null, softDropTimer = null;
+
+    const cancelLongPress = () => {
+      if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+      if (softDropTimer) { clearInterval(softDropTimer); softDropTimer = null; }
+      longPressActive = false;
+    };
+
     const gc = document.getElementById('game-container');
+
     gc.addEventListener('touchstart', (e) => {
-      if (e.touches.length === 1) {
-        touchStartX = e.touches[0].clientX;
-        touchStartY = e.touches[0].clientY;
-        touchStartTime = Date.now();
+      if (!this.isMobile) return;
+      if (this.engine.state === 'waiting') return;
+      if (this.engine.state === 'paused' || this.engine.state === 'gameover') {
+        if (this.engine.state === 'gameover') this.restart();
+        return;
       }
-    }, {passive: true});
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      touchId = t.identifier;
+      touchStartX = t.clientX;
+      touchStartY = t.clientY;
+      touchStartTime = Date.now();
+      lastMoveX = 0;
+      movedHoriz = false;
+      longPressActive = false;
+      this.audio.init();
+
+      // Long press → soft drop (400ms delay, then repeat every 50ms)
+      longPressTimer = setTimeout(() => {
+        longPressActive = true;
+        softDropTimer = setInterval(() => {
+          if (this.engine.state === 'playing') this.engine.moveDown();
+        }, 50);
+      }, 400);
+    }, {passive: false});
+
+    gc.addEventListener('touchmove', (e) => {
+      if (!this.isMobile) return;
+      if (touchId === null) return;
+      const t = Array.from(e.touches).find(t => t.identifier === touchId);
+      if (!t) return;
+      const dx = t.clientX - touchStartX;
+      const totalDx = Math.abs(dx);
+      const totalDy = Math.abs(t.clientY - touchStartY);
+
+      // If moved significantly horizontal, cancel long-press
+      if (totalDx > 15 || totalDy > 30) {
+        cancelLongPress();
+      }
+
+      if (totalDx > 15 && totalDx > totalDy * 0.6) {
+        movedHoriz = true;
+        const movedPx = dx - lastMoveX;
+        if (Math.abs(movedPx) >= 15) {
+          if (movedPx > 0) this.engine.moveRight();
+          else this.engine.moveLeft();
+          lastMoveX = dx;
+        }
+      }
+    }, {passive: false});
 
     gc.addEventListener('touchend', (e) => {
-      if (this.engine.state === 'paused' || this.engine.state === 'gameover') return;
-      this.audio.init();
-      const dx = (e.changedTouches[0]?.clientX || touchStartX) - touchStartX;
-      const dy = (e.changedTouches[0]?.clientY || touchStartY) - touchStartY;
-      const dt = Date.now() - touchStartTime;
-      const absDx = Math.abs(dx);
-      const absDy = Math.abs(dy);
+      if (!this.isMobile) return;
+      if (touchId === null) return;
+      const t = Array.from(e.changedTouches).find(t => t.identifier === touchId);
+      if (!t) { touchId = null; return; }
+      cancelLongPress();
 
-      if (absDx < 10 && absDy < 10 && dt < 300) {
+      const dx = t.clientX - touchStartX;
+      const dy = t.clientY - touchStartY;
+      const dt = Date.now() - touchStartTime;
+
+      if (!movedHoriz && Math.abs(dx) < 10 && Math.abs(dy) < 10 && dt < 300) {
         // Tap → rotate
-        if (this.engine.rotate(1)) this.audio.playRotate();
-      } else if (absDy > absDx && dy > 40 && dt < 500) {
-        // Swipe down → hard drop
-        this.engine.hardDrop();
-        this.audio.playHardDrop();
-        this.triggerShake(3, 120);
-      } else if (absDx > absDy && absDx > 20) {
-        // Swipe left/right
-        const moved = dx > 0 ? this.engine.moveRight() : this.engine.moveLeft();
-        if (moved) this.audio.playMove();
+        if (this.engine.state === 'playing') {
+          if (this.engine.rotate(1)) this.audio.playRotate();
+        }
       }
+
+      touchId = null;
     });
 
-    window.addEventListener('resize', () => {
+    gc.addEventListener('touchcancel', () => {
+      cancelLongPress();
+      touchId = null;
+    });
+
+    // Proportional scaling on resize
+    const doResize = () => {
       this.renderer.resize();
       this.bgParticles.resize();
-    });
+      if (this.isMobile) {
+        this._applyMobileScale();
+      }
+    };
+    window.addEventListener('resize', doResize);
+    if (this.isMobile) {
+      doResize();
+    }
   }
 
   setupVolume() {
@@ -2406,7 +2515,7 @@ class Game {
 
     if (musicSlider) {
       musicSlider.addEventListener('input', () => {
-        const v = parseInt(musicSlider.value) / 100 * 2.0;
+        const v = parseInt(musicSlider.value) / 100 * 3.0;
         if (this.nsfMusic.gainNode) {
           this.nsfMusic.gainNode.gain.value = v;
         }
@@ -2495,6 +2604,22 @@ class Game {
     setTimeout(() => {
       document.getElementById('flash-overlay').classList.remove('active');
     }, duration);
+  }
+
+  _applyMobileScale() {
+    const app = document.getElementById('app');
+    if (!app) return;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // Natural size: left(130) + gap(20) + center(10*cellSize) + gap(20) + right(150) ≈
+    const cellSize = this.renderer.cellSize;
+    const naturalW = 130 + 20 + COLS * cellSize + 20 + 150 + 40; // 40 padding
+    const naturalH = 120 + ROWS * cellSize + 110; // title + board + bottom (controls padding)
+    const scaleW = vw / naturalW;
+    const scaleH = vh / naturalH;
+    const scale = Math.min(scaleW, scaleH, 1.0); // don't scale up
+    app.style.transform = 'scale(' + scale + ')';
+    app.style.transformOrigin = 'center center';
   }
 
   updateUI() {

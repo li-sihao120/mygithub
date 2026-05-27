@@ -190,6 +190,31 @@ body {
   100% { opacity: 0; transform: translate(-50%, -50%) scale(1) translateY(-40px); }
 }
 
+/* Achievement popup */
+#achievement-text {
+  position: absolute;
+  top: 65%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  color: #00E676;
+  text-shadow: 0 0 15px #00E676, 0 0 30px #69F0AE;
+  pointer-events: none;
+  z-index: 7;
+  opacity: 0;
+  white-space: nowrap;
+}
+#achievement-text.pop {
+  animation: achievePop 1.2s ease-out forwards;
+}
+@keyframes achievePop {
+  0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; }
+  15% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; }
+  30% { transform: translate(-50%, -70%) scale(1); opacity: 0.9; }
+  100% { transform: translate(-50%, -100%) scale(0.8); opacity: 0; }
+}
+
 #tetris-text {
   font-size: 48px;
   color: #00F5FF;
@@ -655,6 +680,7 @@ body {
   #pause-hint { font-size: 10px; }
   #combo-text { font-size: 20px; }
   #victory-text { font-size: 28px; }
+  #achievement-text { font-size: 13px; letter-spacing: 2px; }
 }
 
 @media (min-width: 769px) {
@@ -693,6 +719,7 @@ body {
       <div id="red-overlay"></div>
       <div id="flash-overlay"></div>
       <div id="combo-text" class="overlay-text"></div>
+      <div id="achievement-text"></div>
       <div id="tetris-text" class="overlay-text">TETRIS</div>
       <div id="victory-text" class="overlay-text">NEW RECORD</div>
       <div id="gameover-box">
@@ -843,7 +870,14 @@ class NSFMusicPlayer {
   _cmd(command, data) {
     return new Promise((resolve) => {
       const messageId = Math.random();
-      this._msgHandlers.set(messageId, resolve);
+      const timer = setTimeout(() => {
+        this._msgHandlers.delete(messageId);
+        resolve(null);
+      }, 5000);
+      this._msgHandlers.set(messageId, (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      });
       this.workletNode.port.postMessage({ messageId, command, data });
     });
   }
@@ -853,7 +887,7 @@ class NSFMusicPlayer {
       this._msgHandlers.get(msg.messageId)(msg.data);
       this._msgHandlers.delete(msg.messageId);
     }
-    if (msg.command === 'TrackEnd') {
+    if (msg.command === 'TrackEnd' && !this._loading) {
       clearTimeout(this.trackTimeout);
       this.playRandom();
     }
@@ -913,51 +947,75 @@ class NSFMusicPlayer {
   }
 
   async playRandom() {
-    if (!this.initialized) {
-      const ok = await this.init();
-      if (!ok) return;
-      const slider = document.getElementById('music-vol');
-      if (slider && this.gainNode) {
-        this.gainNode.gain.value = parseInt(slider.value) / 100;
-      }
-    }
+    if (this._loading) return;
+    this._loading = true;
+    clearTimeout(this.trackTimeout);
 
-    if (this.ctx.state === 'suspended') await this.ctx.resume();
-
-    // Load popular songs cache if empty
-    await this._loadPopularSongs();
-
-    let song = null;
-    if (this._songCache.length > 0) {
-      // Pick next from shuffled cache (cycle through all)
-      if (this._cacheIndex >= this._songCache.length) {
-        this._cacheIndex = 0;
-        // Re-shuffle
-        for (let i = this._songCache.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [this._songCache[i], this._songCache[j]] = [this._songCache[j], this._songCache[i]];
+    try {
+      if (!this.initialized) {
+        const ok = await this.init();
+        if (!ok) return;
+        const slider = document.getElementById('music-vol');
+        if (slider && this.gainNode) {
+          this.gainNode.gain.value = parseInt(slider.value) / 100;
         }
       }
-      song = this._songCache[this._cacheIndex++];
-    } else {
-      // Fallback to random API
-      const res = await this._apiPost('song/get-random', { one: true });
-      if (res && res[0]) song = res[0];
+
+      if (this.ctx.state === 'suspended') await this.ctx.resume();
+
+      await this._loadPopularSongs();
+
+      let song = null;
+      if (this._songCache.length > 0) {
+        if (this._cacheIndex >= this._songCache.length) {
+          this._cacheIndex = 0;
+          for (let i = this._songCache.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [this._songCache[i], this._songCache[j]] = [this._songCache[j], this._songCache[i]];
+          }
+        }
+        song = this._songCache[this._cacheIndex++];
+      } else {
+        const res = await this._apiPost('song/get-random', { one: true });
+        if (res && res[0]) song = res[0];
+      }
+      if (!song) return;
+
+      const publicId = song?.song?.publicId;
+      if (!publicId) return;
+
+      const nsfBuf = await this._fetchNSFFile(publicId);
+      if (!nsfBuf || nsfBuf.byteLength === 0) return;
+
+      // Crossfade: fade out current song
+      if (this.currentSong && this.gainNode) {
+        const now = this.ctx.currentTime;
+        this.gainNode.gain.cancelScheduledValues(now);
+        this.gainNode.gain.setValueAtTime(this.gainNode.gain.value, now);
+        this.gainNode.gain.linearRampToValueAtTime(0.001, now + 0.25);
+        this._cmd('Pause', true);
+      }
+
+      this.currentSong = song;
+      this.trackDuration = (song.info?.playLength || 150);
+
+      await this._cmd('LoadFile', new Uint8Array(nsfBuf));
+      await this._cmd('ChangeIndex', 0);
+      await this._cmd('Pause', false);
+
+      // Crossfade: fade in
+      if (this.gainNode) {
+        const slider = document.getElementById('music-vol');
+        const targetGain = slider ? parseInt(slider.value) / 100 * 2.0 : 1.2;
+        const now = this.ctx.currentTime;
+        this.gainNode.gain.cancelScheduledValues(now);
+        this.gainNode.gain.setValueAtTime(0.001, now);
+        this.gainNode.gain.linearRampToValueAtTime(targetGain, now + 0.3);
+      }
+      this._scheduleNext();
+    } finally {
+      this._loading = false;
     }
-    if (!song) return;
-
-    const publicId = song?.song?.publicId;
-    if (!publicId) return;
-
-    const nsfBuf = await this._fetchNSFFile(publicId);
-    if (!nsfBuf || nsfBuf.byteLength === 0) return;
-
-    this.currentSong = song;
-    this.trackDuration = (song.info?.playLength || 150);
-
-    await this._cmd('LoadFile', new Uint8Array(nsfBuf));
-    await this._cmd('ChangeIndex', 0);
-    this._scheduleNext();
   }
 
   _scheduleNext() {
@@ -1158,6 +1216,48 @@ class AudioSystem {
     [523, 659, 784, 1047].forEach((f, i) => {
       setTimeout(() => this._osc('sine', f, 0.15, 0.06), i * 80);
     });
+  }
+
+  playNice() {
+    this._osc('sine', 600, 0.18, 0.05);
+    this._osc('triangle', 800, 0.15, 0.04);
+    this._osc('square', 1200, 0.1, 0.03);
+  }
+
+  playGreat() {
+    this._osc('sine', 700, 0.2, 0.06);
+    setTimeout(() => this._osc('triangle', 900, 0.18, 0.05), 60);
+    setTimeout(() => this._osc('square', 1400, 0.12, 0.04), 100);
+    setTimeout(() => this._noise(0.08, 0.04), 120);
+  }
+
+  playAwesome() {
+    this._osc('square', 200, 0.2, 0.04);
+    setTimeout(() => {
+      this._osc('sawtooth', 600, 0.2, 0.05);
+      this._osc('sawtooth', 900, 0.18, 0.04);
+    }, 80);
+    setTimeout(() => this._osc('sine', 1200, 0.15, 0.05), 160);
+    setTimeout(() => this._noise(0.12, 0.06), 180);
+  }
+
+  playOnFire() {
+    this._osc('sawtooth', 300, 0.15, 0.04);
+    setTimeout(() => {
+      this._osc('sawtooth', 500, 0.18, 0.05);
+      this._osc('square', 800, 0.12, 0.03);
+    }, 50);
+    setTimeout(() => {
+      this._osc('sawtooth', 700, 0.16, 0.04);
+      this._noise(0.1, 0.05);
+    }, 100);
+    setTimeout(() => this._osc('sine', 1000, 0.12, 0.04), 150);
+  }
+
+  playPerfectDrop() {
+    this._osc('triangle', 90, 0.25, 0.06);
+    this._noise(0.08, 0.04);
+    setTimeout(() => this._osc('sine', 500, 0.15, 0.04), 40);
   }
 
   playGameOver() {
@@ -1445,6 +1545,7 @@ class TetrisEngine {
     this.boardVersion = 0;
     this.gravityTimer = 0;
     this.chainClears = 0;
+    this.perfectDropFlag = false;
     this.onGravityStep = null;
     this.ensureQueue();
     this.spawnPiece();
@@ -1559,6 +1660,7 @@ class TetrisEngine {
       dropDist++;
       this._addTrail();
     }
+    this.perfectDropFlag = (dropDist >= 8);
     this.score += dropDist * 2;
     this.lockPiece();
   }
@@ -2466,6 +2568,16 @@ class Game {
     el.classList.add('pop');
   }
 
+  showAchievement(text, color) {
+    const el = document.getElementById('achievement-text');
+    el.textContent = text;
+    el.style.color = color;
+    el.style.textShadow = '0 0 15px ' + color + ', 0 0 30px ' + color;
+    el.classList.remove('pop');
+    void el.offsetWidth;
+    el.classList.add('pop');
+  }
+
   showTetrisText() {
     const el = document.getElementById('tetris-text');
     el.classList.remove('flash');
@@ -2579,9 +2691,38 @@ class Game {
     // Chain fully ended (clearing or gravity → playing)
     if (this.engine.state === 'playing' && (prevState === 'clearing' || prevState === 'gravity')) {
       this.prevClearing = false;
+
+      // Achievement checks
+      const cc = this.engine.lastClearCount;
+      if (cc === 1) {
+        this.showAchievement('NICE!', '#00E676');
+        this.audio.playNice();
+      } else if (cc === 2) {
+        this.showAchievement('GREAT!', '#00F5FF');
+        this.audio.playGreat();
+      } else if (cc === 3) {
+        this.showAchievement('AWESOME!', '#B026FF');
+        this.audio.playAwesome();
+      } else if (cc === 4) {
+        this.showAchievement('INCREDIBLE!', '#FFD500');
+        this.audio.playAwesome();
+      }
+      if (this.engine.perfectDropFlag && cc > 0) {
+        this.showAchievement('PERFECT!', '#FFD500');
+        this.audio.playPerfectDrop();
+      }
+      this.engine.perfectDropFlag = false;
+
       // Show accumulated combo/tetris effects
       if (this.engine.combo > 0) {
         this.showComboText(this.engine.combo);
+        if (this.engine.combo >= 6) {
+          this.showAchievement('UNSTOPPABLE!', '#FFD500');
+          this.audio.playOnFire();
+        } else if (this.engine.combo >= 4) {
+          this.showAchievement('ON FIRE!', '#FF9100');
+          this.audio.playOnFire();
+        }
         this.audio.playCombo(this.engine.combo);
       }
       if (this.engine.chainClears > 1) {

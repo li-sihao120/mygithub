@@ -673,7 +673,11 @@ body {
   pointer-events: all;
 }
 
-.mobile #pause-buttons {
+#pause-overlay.visible #pause-buttons {
+  display: flex;
+}
+
+.mobile #pause-overlay.visible #pause-buttons {
   display: flex;
 }
 
@@ -728,7 +732,7 @@ body {
 .mobile #achievement-text { font-size: 13px; letter-spacing: 2px; }
 .mobile #pause-hint { display: none; }
 .mobile #restart-hint { display: none; }
-.mobile #gameover-buttons { display: flex; }
+.mobile #gameover-box.visible #gameover-buttons { display: flex; }
 
 #gameover-buttons {
   display: none;

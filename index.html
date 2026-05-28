@@ -1668,6 +1668,8 @@ class TetrisEngine {
     this.chainClears = 0;
     this.allClear = false;
     this.perfectDropFlag = false;
+    this.previewMode = false;
+    this.previewDidReset = false;
     this.onGravityStep = null;
     this.ensureQueue();
     this.spawnPiece();
@@ -1709,14 +1711,26 @@ class TetrisEngine {
     this.lockResets = 0;
     this.dropTimer = 0;
 
-    // Check game over
+    // Check game over (or preview-mode board sweep)
     if (this.collides(this.currentPiece.shape, this.currentPiece.x, this.currentPiece.y)) {
+      if (this.previewMode) {
+        this._sweepBoard();
+        return this.spawnPiece();
+      }
       this.gameOver = true;
       this.state = 'gameover';
       this.currentPiece = null;
       return false;
     }
     return true;
+  }
+
+  _sweepBoard() {
+    // Clear the board instantly with a reset flag for visual effect
+    this.board = Array.from({length: ROWS}, () => Array(COLS).fill(null));
+    this.boardVersion++;
+    this.previewDidReset = true;
+    this.combo = -1;
   }
 
   collides(shape, x, y) {
@@ -1865,6 +1879,11 @@ class TetrisEngine {
     if (this.onLock) this.onLock();
 
     if (aboveBoard) {
+      if (this.previewMode) {
+        this._sweepBoard();
+        this.spawnPiece();
+        return;
+      }
       this.gameOver = true;
       this.state = 'gameover';
       return;
@@ -2416,7 +2435,8 @@ class Game {
     this.victoryTimer = 0;
     this.prevClearing = false;
 
-    this.engine.state = 'playing'; // render piece as preview, but don't update engine yet
+    this.engine.state = 'playing'; // render piece as preview behind start screen
+    this.engine.previewMode = true;  // auto-sweep instead of gameover in preview
     this.setupInput();
     this.setupVolume();
     this.updateUI();
@@ -2429,6 +2449,7 @@ class Game {
 
   startGame() {
     this.engine.reset();
+    this.engine.previewMode = false;
     this.engine.state = 'playing';
     document.getElementById('start-screen').classList.add('hidden');
     this.audio.init();
@@ -2720,6 +2741,7 @@ class Game {
 
   goToMenu() {
     this.engine.reset(); // fresh board with dynamic preview behind menu
+    this.engine.previewMode = true;
     document.getElementById('pause-overlay').classList.remove('visible');
     document.getElementById('gameover-box').classList.remove('visible', 'pop', 'settle');
     document.getElementById('victory-text').classList.remove('show');
@@ -2741,6 +2763,7 @@ class Game {
 
   restart() {
     this.engine.reset();
+    this.engine.previewMode = false;
     this.particles.clear();
     this.deathTimer = 0;
     this.deathPhase = 0;
@@ -2921,10 +2944,16 @@ class Game {
       if (this.shakeDuration <= 0) this.shakeAmount = 0;
     }
 
-    // Always run engine (dynamic preview behind start screen)
-    // Auto-restart preview when gameover while start screen is visible
-    if (this.engine.state === 'gameover' && !document.getElementById('start-screen').classList.contains('hidden')) {
-      this.engine.reset();
+    // Preview-mode board sweep visual effect
+    if (this.engine.previewDidReset) {
+      this.engine.previewDidReset = false;
+      this.renderer.invalidateBoard();
+      const cs = this.renderer.cellSize;
+      // Burst particles from the board center as "sweep" effect
+      for (let i = 0; i < 5; i++) {
+        this.particles.emit(cs * 5, cs * ROWS / 2, 15, '#00F5FF', cs * 0.35);
+      }
+      this.triggerFlash(100);
     }
 
     if (this.engine.state === 'gameover') {

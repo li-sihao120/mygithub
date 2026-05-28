@@ -1059,31 +1059,26 @@ class NSFMusicPlayer {
     this._loading = true;
     clearTimeout(this.trackTimeout);
 
+    const XFADE_MS = 400;
+
     try {
+      // ── 1. Ensure audio is ready ──────────────────────────
       if (!this.initialized) {
         const ok = await this.init();
-        if (!ok) return;
-        const slider = document.getElementById('music-vol');
-        if (slider && this.gainNode) {
-          this.gainNode.gain.value = parseInt(slider.value) / 100;
-        }
+        if (!ok) { this._scheduleRetry(); return; }
       }
-
       if (this.ctx.state === 'suspended') await this.ctx.resume();
-
-      // Ensure song list is loaded (non-blocking if cached)
       await this._loadPopularSongs();
 
+      // ── 2. Fetch new song BEFORE touching current playback ─
       let song = null;
       let nsfBuf = null;
 
-      // Use preloaded song data if available (instant playback)
       if (this._preloadedBuf) {
         song = this._preloadedSong;
         nsfBuf = this._preloadedBuf;
         this._preloadedSong = null;
         this._preloadedBuf = null;
-        // Preload next song in background for future playback
         this._preloadNextSong();
       } else {
         if (this._songCache.length > 0) {
@@ -1099,38 +1094,52 @@ class NSFMusicPlayer {
           const res = await this._apiPost('song/get-random', { one: true });
           if (res && res[0]) song = res[0];
         }
-        if (!song) return;
+        if (!song) { this._scheduleRetry(); return; }
 
         nsfBuf = await this._fetchNSFFile(song.song.publicId);
-        if (!nsfBuf || nsfBuf.byteLength === 0) return;
+        if (!nsfBuf || nsfBuf.byteLength === 0) { this._scheduleRetry(); return; }
       }
 
-      // Crossfade: fade out current song
-      if (this.currentSong && this.gainNode) {
+      // ── 3. New song ready — now do the crossfade transition ─
+      const hadSong = !!this.currentSong;
+
+      // Fade out (schedule the ramp, then wait for it)
+      if (hadSong && this.gainNode && this.ctx) {
         const now = this.ctx.currentTime;
         this.gainNode.gain.cancelScheduledValues(now);
         this.gainNode.gain.setValueAtTime(this.gainNode.gain.value, now);
-        this.gainNode.gain.linearRampToValueAtTime(0.001, now + 0.25);
+        this.gainNode.gain.linearRampToValueAtTime(0.001, now + XFADE_MS / 1000);
+      }
+
+      // Wait for fade-out to finish, then pause old track
+      if (hadSong) {
+        await new Promise(r => setTimeout(r, XFADE_MS + 50));
         this._cmd('Pause', true);
       }
 
+      // ── 4. Load and start new track ───────────────────────
       this.currentSong = song;
       this.trackDuration = (song.info?.playLength || 150);
 
       await this._cmd('LoadFile', new Uint8Array(nsfBuf));
       await this._cmd('ChangeIndex', 0);
-      await this._cmd('Pause', false);
 
-      // Crossfade: fade in
-      if (this.gainNode) {
+      // Set gain to near-silence, unpause, then fade in
+      if (this.gainNode && this.ctx) {
+        const now = this.ctx.currentTime;
         const slider = document.getElementById('music-vol');
         const targetGain = slider ? parseInt(slider.value) / 100 * 3.0 : 2.4;
-        const now = this.ctx.currentTime;
         this.gainNode.gain.cancelScheduledValues(now);
         this.gainNode.gain.setValueAtTime(0.001, now);
-        this.gainNode.gain.linearRampToValueAtTime(targetGain, now + 0.3);
+        this.gainNode.gain.linearRampToValueAtTime(targetGain, now + XFADE_MS / 1000);
       }
+
+      await this._cmd('Pause', false);
       this._scheduleNext();
+
+    } catch (e) {
+      console.warn('NSF playRandom error:', e);
+      this._scheduleRetry();
     } finally {
       this._loading = false;
     }
@@ -1138,8 +1147,13 @@ class NSFMusicPlayer {
 
   _scheduleNext() {
     clearTimeout(this.trackTimeout);
-    // Play for the song's duration, then advance
-    this.trackTimeout = setTimeout(() => this.playRandom(), Math.max(5000, this.trackDuration * 1000));
+    // TrackEnd from worklet is the primary trigger; timeout is a safety fallback
+    this.trackTimeout = setTimeout(() => this.playRandom(), Math.max(15000, (this.trackDuration + 5) * 1000));
+  }
+
+  _scheduleRetry() {
+    clearTimeout(this.trackTimeout);
+    this.trackTimeout = setTimeout(() => this.playRandom(), 3000);
   }
 
   stop() {
@@ -1936,6 +1950,7 @@ class TetrisEngine {
 
     // No lines cleared → reset combo, spawn next
     this.combo = -1;
+    this.chainClears = 0;
     this.state = 'playing';
     this.spawnPiece();
     return 0;
@@ -1943,10 +1958,12 @@ class TetrisEngine {
 
   finishClear() {
     const count = this.clearRows.length;
-    // Remove from bottom to top
-    const sorted = [...this.clearRows].sort((a, b) => b - a);
-    for (const row of sorted) {
-      this.board.splice(row, 1);
+    // Sort ascending and remove rows from bottom to top
+    const sorted = [...this.clearRows].sort((a, b) => a - b);
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      this.board.splice(sorted[i], 1);
+    }
+    for (let i = 0; i < count; i++) {
       this.board.unshift(Array(COLS).fill(null));
     }
 
@@ -1969,66 +1986,52 @@ class TetrisEngine {
     this.clearRows = [];
     this.clearTimer = 0;
 
-    // Restart the chain loop: check for gravity first
-    // (allClear check and bonus are handled inside _chainClearLoop)
-    this._chainClearLoop();
+    // Start animated chain: gravity → check → possibly clear → repeat
+    this._afterClear();
     this.boardVersion++;
 
     return { count, combo: this.combo, tetris: this.tetrisTriggered, leveledUp: this.leveledUp, allClear: this.allClear };
   }
 
-  // Iteratively clear → gravity → clear until no rows remain
-  _chainClearLoop() {
-    do {
-      // Apply gravity steps if needed (floating cells exist)
-      if (this.needsGravity()) {
-        this.chainClears++;
-        while (this.applyGravityStep()) {
-          if (this.onGravityStep) this.onGravityStep();
-        }
-      }
+  // After rows are cleared, check for floating cells → animated gravity
+  _afterClear() {
+    if (this.needsGravity()) {
+      this.chainClears++;
+      this.state = 'gravity';
+      this.gravityTimer = 0;
+      return;
+    }
+    // Board is settled — check all-clear
+    this.allClear = this.board.every(row => row.every(cell => cell === null));
+    if (this.allClear) {
+      this.score += 2000 * this.level;
+    }
+    this._finishChain();
+  }
 
-      // Check for any full rows (handles rows formed by gravity,
-      // or rows that were somehow missed by the initial checkLines pass)
-      const fullRows = [];
-      for (let r = 0; r < ROWS; r++) {
-        if (this.board[r].every(cell => cell !== null)) {
-          fullRows.push(r);
-        }
+  // Called when gravity animation settles — look for newly formed full rows
+  _checkChainClears() {
+    const fullRows = [];
+    for (let r = 0; r < ROWS; r++) {
+      if (this.board[r].every(cell => cell !== null)) {
+        fullRows.push(r);
       }
-      if (fullRows.length === 0) break;
+    }
+    if (fullRows.length > 0) {
+      // Chain link: another clear — let finishClear handle scoring
+      this.clearRows = fullRows;
+      this.clearTimer = 350;
+      this.state = 'clearing';
+      this.tetrisTriggered = this.tetrisTriggered || (fullRows.length === 4);
+      return fullRows.length;
+    }
+    this._finishChain();
+    return 0;
+  }
 
-      // Clear the rows
-      const cc = fullRows.length;
-      const sorted = [...fullRows].sort((a, b) => b - a);
-      for (const row of sorted) {
-        this.board.splice(row, 1);
-        this.board.unshift(Array(COLS).fill(null));
-      }
-      const POINTS2 = [0, 100, 300, 500, 800];
-      this.score += (POINTS2[cc] || 0) * this.level;
-      this.lines += cc;
-      this.combo++;
-      if (this.combo >= 1) {
-        this.score += 50 * this.combo * this.level;
-      }
-      this.lastClearCount = cc;
-      this.tetrisTriggered = this.tetrisTriggered || (cc === 4);
-      const nl = Math.floor(this.lines / 10) + 1;
-      this.leveledUp = this.leveledUp || (nl > this.level);
-      this.level = nl;
-
-      // Check All Clear after this chain link
-      this.allClear = this.board.every(row => row.every(cell => cell === null));
-      if (this.allClear) {
-        this.score += 2000 * this.level;
-        break;
-      }
-    } while (this.needsGravity());
-
-    // Chain complete
+  _finishChain() {
     this.state = 'playing';
-    if (!this.gameOver) this.spawnPiece();
+    this.spawnPiece();
   }
 
   getGhostY() {
@@ -2070,11 +2073,8 @@ class TetrisEngine {
         if (moved) {
           this.gravityTimer = 40;
         } else {
-          // Gravity settled, check for chain clears
-          if (this.chainClears > 0) {
-            this.combo = Math.max(0, this.combo);
-          }
-          this.checkLines();
+          // Gravity settled — check for chain clears or finish chain
+          this._checkChainClears();
         }
       }
       return;
@@ -2451,6 +2451,7 @@ class Game {
     this.engine.reset();
     this.engine.previewMode = false;
     this.engine.state = 'playing';
+    this.renderer.invalidateBoard();
     document.getElementById('start-screen').classList.add('hidden');
     this.audio.init();
     // Apply volume slider values

@@ -2509,10 +2509,12 @@ class Game {
           e.preventDefault();
           break;
         case 'ArrowUp': case 'w': case 'W':
+          if (e.repeat) return;
           if (this.engine.rotate(1)) this.audio.playRotate();
           e.preventDefault();
           break;
         case ' ':
+          if (e.repeat) return;
           this.engine.hardDrop();
           this.audio.playHardDrop();
           this.triggerShake(3, 120);
@@ -2524,6 +2526,7 @@ class Game {
           e.preventDefault();
           break;
         case 'z': case 'Z':
+          if (e.repeat) return;
           if (this.engine.rotate(-1)) this.audio.playRotate();
           e.preventDefault();
           break;

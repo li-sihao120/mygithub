@@ -1063,11 +1063,18 @@ class NSFMusicPlayer {
 
     try {
       // ── 1. Ensure audio is ready ──────────────────────────
+      // Resume AudioContext immediately (critical for mobile user-gesture scope)
+      if (this.ctx && this.ctx.state === 'suspended') {
+        await this.ctx.resume();
+      }
       if (!this.initialized) {
         const ok = await this.init();
         if (!ok) { this._scheduleRetry(); return; }
       }
-      if (this.ctx.state === 'suspended') await this.ctx.resume();
+      // Mobile browsers may re-suspend after init — resume again
+      if (this.ctx && this.ctx.state === 'suspended') {
+        await this.ctx.resume();
+      }
       await this._loadPopularSongs();
 
       // ── 2. Fetch new song BEFORE touching current playback ─

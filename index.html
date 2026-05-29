@@ -1998,7 +1998,7 @@ class TetrisEngine {
     if (this.needsGravity()) {
       this.chainClears++;
       this.state = 'gravity';
-      this.gravityTimer = 0;
+      this.gravityTimer = 120; // brief pause so player sees cleared board before cells drop
       return;
     }
     // Board is settled — check all-clear
@@ -2071,7 +2071,7 @@ class TetrisEngine {
         const moved = this.applyGravityStep();
         if (this.onGravityStep) this.onGravityStep();
         if (moved) {
-          this.gravityTimer = 40;
+          this.gravityTimer = 55;
         } else {
           // Gravity settled — check for chain clears or finish chain
           this._checkChainClears();
@@ -2415,7 +2415,11 @@ class Game {
     this.engine = new TetrisEngine();
     this.engine.onAutoDrop = () => this.audio.playSoftDrop();
     this.engine.onLock = () => this.audio.playLock();
-    this.engine.onGravityStep = () => this.audio.playGravity();
+    this._gravitySoundTick = 0;
+    this.engine.onGravityStep = () => {
+      this._gravitySoundTick++;
+      if (this._gravitySoundTick % 3 === 0) this.audio.playGravity();
+    };
     this.particles = new ParticleSystem();
     this.bgParticles = new BGParticles(document.getElementById('bg-canvas'));
     this.renderer = new Renderer(
@@ -2610,8 +2614,7 @@ class Game {
       if (!this.isMobile) return;
       if (!document.getElementById('start-screen').classList.contains('hidden')) return;
       if (this.engine.state === 'paused' || this.engine.state === 'gameover') {
-        if (this.engine.state === 'gameover') this.restart();
-        return;
+        return; // ignore game-area touches during pause/gameover — use buttons instead
       }
       if (e.touches.length !== 1) return;
       cancelLongPress(); // clear any stale timers from previous touches
@@ -2999,6 +3002,7 @@ class Game {
     // Emit particles at start of each clear (including chain clears)
     if (this.engine.state === 'clearing' && !this.prevClearing) {
       this.prevClearing = true;
+      this._gravitySoundTick = 0; // reset gravity sound throttle for new chain link
       const cs = this.renderer.cellSize;
       for (const row of this.engine.clearRows) {
         this.particles.emitLineClear(row, cs, 0, 0);
